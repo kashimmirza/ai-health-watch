@@ -1,41 +1,46 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Camera as CameraIcon, ScanLine, X, Image, Loader2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Camera as CameraIcon, ScanLine, X, Image, Loader2, CheckCircle, AlertTriangle, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCamera, type CapturedImage } from '@/hooks/useCamera';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface AIVisionPanelProps {
   onAnalysisComplete?: (result: AnalysisResult) => void;
 }
 
-interface AnalysisResult {
+export interface AnalysisResult {
   skinCondition: string;
   confidence: number;
   recommendations: string[];
   riskLevel: 'low' | 'medium' | 'high';
+  details?: string;
 }
 
-const mockAnalysis = (): AnalysisResult => {
-  const conditions = [
-    { condition: 'Healthy skin appearance', risk: 'low' as const },
-    { condition: 'Minor skin irritation detected', risk: 'medium' as const },
-    { condition: 'Possible dermatitis pattern', risk: 'medium' as const },
-  ];
-  
-  const selected = conditions[Math.floor(Math.random() * conditions.length)];
-  
-  return {
-    skinCondition: selected.condition,
-    confidence: 75 + Math.random() * 20,
-    recommendations: [
-      'Continue regular monitoring',
-      'Maintain proper hydration',
-      'Use sunscreen when outdoors',
-    ],
-    riskLevel: selected.risk,
-  };
-};
+async function analyzeSkinImage(imageBase64: string): Promise<AnalysisResult> {
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-skin`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+    },
+    body: JSON.stringify({ imageBase64 }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Analysis failed' }));
+    if (response.status === 429) {
+      throw new Error('Rate limit exceeded. Please try again in a moment.');
+    }
+    if (response.status === 402) {
+      throw new Error('AI credits exhausted. Please add credits to continue.');
+    }
+    throw new Error(error.error || 'Failed to analyze image');
+  }
+
+  return response.json();
+}
 
 export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
   const { capturePhoto, pickFromGallery, clearImage, isCapturing, lastImage, error } = useCamera();
@@ -93,13 +98,24 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
     setIsAnalyzing(true);
     setAnalysisResult(null);
     
-    // Simulate AI analysis delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const result = mockAnalysis();
-    setAnalysisResult(result);
-    setIsAnalyzing(false);
-    onAnalysisComplete?.(result);
+    try {
+      const result = await analyzeSkinImage(image.dataUrl);
+      setAnalysisResult(result);
+      onAnalysisComplete?.(result);
+      
+      if (result.riskLevel === 'high') {
+        toast.warning('High risk detected - Please consult a healthcare professional');
+      } else if (result.riskLevel === 'medium') {
+        toast.info('Some concerns detected - Consider professional evaluation');
+      } else {
+        toast.success('Analysis complete');
+      }
+    } catch (err) {
+      console.error('Analysis failed:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to analyze image');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const resetAnalysis = () => {
@@ -112,6 +128,12 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
     low: 'text-success',
     medium: 'text-warning',
     high: 'text-critical',
+  };
+
+  const riskBgColors = {
+    low: 'bg-success/10',
+    medium: 'bg-warning/10',
+    high: 'bg-critical/10',
   };
 
   return (
@@ -127,8 +149,8 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
             <ScanLine className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h3 className="font-semibold text-foreground">AI Vision Analysis</h3>
-            <p className="text-xs text-muted-foreground">Computer vision health screening</p>
+            <h3 className="font-semibold text-foreground">AI Skin Analysis</h3>
+            <p className="text-xs text-muted-foreground">Powered by Gemini Vision</p>
           </div>
         </div>
         {(lastImage || showScanner) && (
@@ -191,7 +213,8 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
                 <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center">
                   <div className="text-center">
                     <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">Analyzing image...</p>
+                    <p className="text-sm text-muted-foreground">AI is analyzing your image...</p>
+                    <p className="text-xs text-muted-foreground mt-1">This may take a few seconds</p>
                   </div>
                 </div>
               )}
@@ -203,11 +226,11 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-3"
               >
-                <div className="flex items-center gap-2">
+                <div className={cn("flex items-center gap-2 p-3 rounded-lg", riskBgColors[analysisResult.riskLevel])}>
                   {analysisResult.riskLevel === 'low' ? (
-                    <CheckCircle className="w-5 h-5 text-success" />
+                    <CheckCircle className="w-5 h-5 text-success flex-shrink-0" />
                   ) : (
-                    <AlertTriangle className={cn('w-5 h-5', riskColors[analysisResult.riskLevel])} />
+                    <AlertTriangle className={cn('w-5 h-5 flex-shrink-0', riskColors[analysisResult.riskLevel])} />
                   )}
                   <span className="font-medium">{analysisResult.skinCondition}</span>
                 </div>
@@ -225,6 +248,15 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
                   <span className="font-medium">{analysisResult.confidence.toFixed(0)}%</span>
                 </div>
 
+                {analysisResult.details && (
+                  <div className="p-3 rounded-lg bg-muted/50 text-sm text-muted-foreground">
+                    <div className="flex items-start gap-2">
+                      <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      <p>{analysisResult.details}</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-1">
                   <p className="text-sm font-medium">Recommendations:</p>
                   <ul className="text-sm text-muted-foreground space-y-1">
@@ -235,6 +267,12 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
                       </li>
                     ))}
                   </ul>
+                </div>
+
+                <div className="pt-2 border-t border-border">
+                  <p className="text-xs text-muted-foreground italic">
+                    ⚠️ This is for educational purposes only. Always consult a healthcare professional for proper diagnosis.
+                  </p>
                 </div>
               </motion.div>
             )}
@@ -252,7 +290,7 @@ export function AIVisionPanel({ onAnalysisComplete }: AIVisionPanelProps) {
                 <CameraIcon className="w-8 h-8 text-primary" />
               </div>
               <p className="text-sm text-muted-foreground text-center px-4">
-                Capture or upload an image for AI-powered health analysis
+                Capture or upload a skin image for AI-powered analysis
               </p>
             </div>
             
