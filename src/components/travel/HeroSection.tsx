@@ -1,6 +1,7 @@
 import { useState } from "react";
 import SearchTabs from "./SearchTabs";
 import HotelSearchForm from "./HotelSearchForm";
+import FlightSearchForm from "./FlightSearchForm";
 
 const HeroSection = () => {
   const [activeTab, setActiveTab] = useState("hotels");
@@ -27,11 +28,7 @@ const HeroSection = () => {
               
               <div className="mt-6">
                 {activeTab === "hotels" && <HotelSearchForm />}
-                {activeTab === "flights" && (
-                  <div className="py-8 text-center text-gray-500">
-                    Flight search form coming soon...
-                  </div>
-                )}
+                {activeTab === "flights" && <FlightSearchForm />}
                 {activeTab === "packages" && (
                   <div className="py-8 text-center text-gray-500">
                     Package search form coming soon...
